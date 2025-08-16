@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Localizador de Choferes (HTML + JavaScript) — Safe/No Web3</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#9ca3af; --accent:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+    *{ box-sizing: border-box }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji'; background:var(--bg); color:#e5e7eb }
+    header{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid #1f2937; position:sticky; top:0; background:linear-gradient(180deg, rgba(17,24,39,.98), rgba(17,24,39,.92)); backdrop-filter:saturate(140%) blur(8px); z-index:500 }
+    header h1{ font-size:18px; margin:0 }
+    header .actions{ display:flex; gap:8px; flex-wrap:wrap }
+    button{ appearance:none; border:1px solid #374151; background:#0b1220; color:#e5e7eb; padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:600 }
+    button:hover{ border-color:#4b5563 }
+    button.primary{ background:linear-gradient(180deg,#10b981,#059669); border-color:transparent; color:white }
+    button.warn{ border-color:#a16207 }
+    #app{ display:grid; grid-template-columns: 360px 1fr; height: calc(100dvh - 60px) }
+    #sidebar{ border-right:1px solid #1f2937; background:#0b1220; overflow:auto }
+    #map{ height:100%; width:100% }
+    .card{ padding:14px; border-bottom:1px solid #1f2937 }
+    .muted{ color:var(--muted); font-size:12px }
+    .drivers{ display:flex; flex-direction:column; gap:10px; padding:12px }
+    .driver{ background:#0d1527; border:1px solid #1f2937; padding:10px; border-radius:12px; display:flex; justify-content:space-between; align-items:center }
+    .pill{ font-size:12px; border:1px solid #334155; border-radius:999px; padding:4px 8px; color:#cbd5e1 }
+    .legend{ display:flex; gap:10px; padding:12px; align-items:center }
+    .legend span{ display:inline-flex; align-items:center; gap:6px }
+    .dot{ width:10px; height:10px; border-radius:50% }
+    .user-dot{ background:#3b82f6 }
+    .driver-dot{ background:#22c55e }
+    .footer{ font-size:12px; color:#94a3b8; opacity:.8; padding:12px }
+    .banner{ display:none; padding:10px 12px; margin:10px; border-radius:10px; border:1px solid #4b5563; background:#1f2937 }
+    .banner.warn{ border-color:#a16207; background:rgba(245,158,11,.15) }
+    .banner.bad{ border-color:#b91c1c; background:rgba(239,68,68,.15) }
+    .testlog{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px; background:#0b1220; border:1px solid #1f2937; border-radius:10px; padding:10px; max-height:180px; overflow:auto }
+    .ok{ color:#10b981 }
+    .fail{ color:#ef4444 }
+    @media (max-width: 980px){ #app{ grid-template-columns: 1fr; grid-template-rows: 300px 1fr } #sidebar{ order:2 } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🚗 Localizador de Choferes</h1>
+    <div class="actions">
+      <button id="btnLocate">Centrar en mi ubicación</button>
+      <button id="btnWatch" class="warn">Seguir mi ubicación</button>
+      <button id="btnSimDrivers" class="primary">Simular choferes</button>
+      <button id="btnClear">Limpiar</button>
+      <button id="btnTests">🧪 Tests</button>
+    </div>
+  </header>
+
+  <div id="app">
+    <aside id="sidebar">
+      <div id="metamaskBanner" class="banner bad">
+        <strong>Atención:</strong> Se detectó un error relacionado con MetaMask, pero <u>esta app NO usa Web3</u>. Si ves este mensaje, probablemente es un plugin/código externo intentando conectarse. Puedes ignorarlo o desactivar la extensión para esta página.
+      </div>
+
+      <div class="card">
+        <strong>Estado</strong>
+        <div class="muted" id="status">Listo</div>
+      </div>
+
+      <div class="card">
+        <strong>Entorno</strong>
+        <div class="muted" id="env"></div>
+      </div>
+
+      <div class="legend">
+        <span><span class="dot user-dot"></span> Tú</span>
+        <span><span class="dot driver-dot"></span> Chofer</span>
+      </div>
+
+      <div class="card">
+        <strong>Choferes cercanos</strong>
+        <div class="muted">Lista en tiempo real (demo).</div>
+      </div>
+      <div class="drivers" id="driversList"></div>
+
+      <div class="card">
+        <strong>Debug / Tests</strong>
+        <div class="muted">Resultados de pruebas y errores capturados.</div>
+        <div id="testOutput" class="testlog" aria-live="polite">(sin pruebas aún)</div>
+      </div>
+
+      <div class="footer">Demo sin backend. Geolocalización del navegador + Leaflet. <br/>No requiere ni intenta usar MetaMask/Web3.</div>
+    </aside>
+    <main id="map"></main>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    // =====================
+    // ⚙️ Estado Global
+    // =====================
+    const App = {
+      map: null,
+      userMarker: null,
+      drivers: new Map(), // id -> {marker, name}
+      simTimer: null,
+      userLatLng: null,
+      watchId: null,
+      testsRun: false
+    };
+
+    // =====================
+    // 🧩 Utilidades
+    // =====================
+    const $ = (sel) => document.querySelector(sel);
+    function setStatus(msg){ $('#status').textContent = msg; console.log('[STATUS]', msg); }
+    function metersToKm(m){ return (m/1000).toFixed(2); }
+    function logTest(msg, ok=true){
+      const box = $('#testOutput');
+      const line = document.createElement('div');
+      line.innerHTML = (ok?'<span class="ok">✔︎</span>':'<span class="fail">✘</span>') + ' ' + msg;
+      box.appendChild(line);
+      box.scrollTop = box.scrollHeight;
+    }
+    function clearTests(){ $('#testOutput').textContent = ''; }
+
+    // =====================
+    // 🗺️ Mapa
+    // =====================
+    function initMap(){
+      App.map = L.map('map', { zoomControl:true });
+      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contrib.'
+      });
+      tiles.addTo(App.map);
+      const santiago = [-33.4489, -70.6693];
+      App.map.setView(santiago, 12);
+    }
+
+    // =====================
+    // 📍 Geolocalización
+    // =====================
+    function checkSecureContext(){
+      const env = `SecureContext: ${window.isSecureContext} — Protocolo: ${location.protocol} — Host: ${location.hostname}`;
+      $('#env').textContent = env;
+      if(!window.isSecureContext && location.hostname !== 'localhost'){
+        setStatus('Para que la geolocalización funcione, usa HTTPS o localhost.');
+      }
+    }
+
+    function placeUserMarker(lat, lng){
+      App.userLatLng = [lat, lng];
+      if(App.userMarker){ App.map.removeLayer(App.userMarker); }
+      App.userMarker = L.marker([lat, lng], { title:'Tú', alt:'Tu ubicación' }).addTo(App.map);
+      App.userMarker.bindPopup('📍 Tú estás aquí');
+      App.map.setView([lat, lng], 15);
+      setStatus(`Ubicación lista (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+    }
+
+    function locateOnce(){
+      if(!('geolocation' in navigator)){
+        setStatus('Geolocalización no soportada por tu navegador');
+        return;
+      }
+      setStatus('Obteniendo ubicación única...');
+      navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        placeUserMarker(latitude, longitude);
+      }, err => {
+        setStatus('No se pudo obtener tu ubicación (' + err.message + ')');
+      }, { enableHighAccuracy:true, timeout:10000 });
+    }
+
+    function toggleWatch(){
+      if(!('geolocation' in navigator)){
+        setStatus('Geolocalización no soportada por tu navegador');
+        return;
+      }
+      if(App.watchId !== null){
+        navigator.geolocation.clearWatch(App.watchId);
+        App.watchId = null;
+        $('#btnWatch').textContent = 'Seguir mi ubicación';
+        setStatus('Seguimiento detenido');
+        return;
+      }
+      setStatus('Iniciando seguimiento (watchPosition)...');
+      App.watchId = navigator.geolocation.watchPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        placeUserMarker(latitude, longitude);
+      }, err => {
+        setStatus('Error seguimiento: ' + err.message);
+      }, { enableHighAccuracy:true, maximumAge: 2000, timeout: 15000 });
+      $('#btnWatch').textContent = 'Detener seguimiento';
+    }
+
+    // =====================
+    // 🚗 Choferes (demo local)
+    // =====================
+    function addDriver(id, lat, lng, name){
+      const marker = L.circleMarker([lat, lng], { radius: 8, weight: 2, color:'#16a34a', fillColor:'#22c55e', fillOpacity:.9 }).addTo(App.map);
+      marker.bindPopup(`🚗 <b>${name}</b><br><span class="muted">ID: ${id}</span>`);
+      App.drivers.set(id, { marker, name });
+      renderDriversList();
+    }
+    function updateDriver(id, newLat, newLng){
+      const d = App.drivers.get(id); if(!d) return;
+      d.marker.setLatLng([newLat, newLng]);
+      renderDriversList();
+    }
+    function removeAllDrivers(){
+      for(const {marker} of App.drivers.values()) marker.remove();
+      App.drivers.clear();
+      renderDriversList();
+    }
+    function renderDriversList(){
+      const list = $('#driversList');
+      list.innerHTML = '';
+      const entries = [...App.drivers.entries()].map(([id, d]) => {
+        let dist = '—';
+        if(App.userLatLng){
+          const user = L.latLng(App.userLatLng);
+          const driver = d.marker.getLatLng();
+          dist = metersToKm(user.distanceTo(driver)) + ' km';
+        }
+        const div = document.createElement('div');
+        div.className = 'driver';
+        div.innerHTML = `<span>🚗 <strong>${d.name}</strong><br><span class="muted">${id}</span></span><span class="pill">${dist}</span>`;
+        div.onclick = () => { App.map.setView(d.marker.getLatLng(), 16); d.marker.openPopup(); };
+        return div;
+      });
+      if(!entries.length){
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.style.padding = '0 12px 12px 12px';
+        empty.textContent = 'Sin choferes aún.';
+        list.appendChild(empty);
+      } else {
+        entries.forEach(el => list.appendChild(el));
+      }
+    }
+    function simulateDrivers(){
+      removeAllDrivers();
+      const base = App.userLatLng || [-33.4489, -70.6693];
+      const names = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elena', 'Felipe', 'Gaby', 'Hugo'];
+      const count = 6;
+      for(let i=0;i<count;i++){
+        const lat = base[0] + (Math.random()-.5) * 0.06; // ~6-7km
+        const lng = base[1] + (Math.random()-.5) * 0.06;
+        addDriver('DRV' + String(i+1).padStart(3,'0'), lat, lng, names[i % names.length]);
+      }
+      if(App.simTimer) clearInterval(App.simTimer);
+      App.simTimer = setInterval(() => {
+        for(const [id, d] of App.drivers){
+          const cur = d.marker.getLatLng();
+          const lat = cur.lat + (Math.random()-.5) * 0.002; // pequeños movimientos
+          const lng = cur.lng + (Math.random()-.5) * 0.002;
+          updateDriver(id, lat, lng);
+        }
+      }, 2000);
+      setStatus('Simulación de choferes en curso');
+    }
+
+    // =====================
+    // 🧪 Pruebas ("test cases")
+    // =====================
+    function runTests(){
+      clearTests();
+      App.testsRun = true;
+      try {
+        logTest('Leaflet cargado (window.L)', typeof L === 'object');
+        logTest('Mapa inicializado', !!App.map);
+        let hasTile = false; App.map.eachLayer(l => { if(l instanceof L.TileLayer) hasTile = true; });
+        logTest('Tile layer presente', hasTile);
+        logTest('Geolocation API disponible', 'geolocation' in navigator);
+        logTest('metersToKm(1234) === 1.23', metersToKm(1234) === '1.23');
+        // Agregar chofer temporal y verificar lista
+        const before = App.drivers.size;
+        addDriver('TEST001', -33.45, -70.66, 'Test Driver');
+        logTest('Chofer agregado al mapa', App.drivers.size === before + 1);
+        const itemsInList = $('#driversList').children.length;
+        logTest('Lista de choferes renderizada (>0)', itemsInList > 0);
+        // Limpieza
+        removeAllDrivers();
+        logTest('Limpieza de choferes', App.drivers.size === 0);
+      } catch(e){
+        logTest('Excepción durante tests: ' + e.message, false);
+        console.error(e);
+      }
+    }
+
+    // =====================
+    // 🧯 Manejo de Errores global
+    // =====================
+    function showMetaMaskBanner(){
+      const banner = $('#metamaskBanner');
+      if(banner) banner.style.display = 'block';
+    }
+    window.addEventListener('error', (ev) => {
+      const msg = ev?.message || '';
+      if(/metamask/i.test(msg)) showMetaMaskBanner();
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+      const msg = String(ev?.reason?.message || ev?.reason || '');
+      if(/metamask/i.test(msg)) showMetaMaskBanner();
+    });
+
+    // =====================
+    // 🔘 Eventos UI
+    // =====================
+    $('#btnLocate').addEventListener('click', locateOnce);
+    $('#btnWatch').addEventListener('click', toggleWatch);
+    $('#btnSimDrivers').addEventListener('click', simulateDrivers);
+    $('#btnClear').addEventListener('click', () => {
+      if(App.userMarker){ App.userMarker.remove(); App.userMarker=null; }
+      if(App.simTimer) { clearInterval(App.simTimer); App.simTimer=null; }
+      if(App.watchId !== null){ navigator.geolocation.clearWatch(App.watchId); App.watchId=null; $('#btnWatch').textContent = 'Seguir mi ubicación'; }
+      removeAllDrivers();
+      setStatus('Limpio');
+    });
+    $('#btnTests').addEventListener('click', runTests);
+
+    // =====================
+    // 🚀 Inicio
+    // =====================
+    (function start(){
+      console.log('Iniciando Localizador de Choferes (No Web3)');
+      initMap();
+      checkSecureContext();
+      // Intento automático de geolocalizar (una vez)
+      locateOnce();
+      // Nota: Esta app NO usa window.ethereum ni intenta conectar a MetaMask
+      Object.defineProperty(window, '__NO_WEB3__', { value: true, writable: false });
+    })();
+  </script>
+
+  <!--
+    🚀 Cómo convertir esta demo en producción (pistas rápidas):
+
+    1) Mapa y UI
+       - Puedes reemplazar Leaflet por Google Maps JS API si prefieres (tiene Directions, Places, etc.).
+
+    2) Backend en tiempo real (elige uno):
+       - WebSockets con Node.js + Socket.IO: rastreo de posiciones y sala por ciudad.
+       - Firebase Realtime Database / Firestore: canales por chofer, reglas de seguridad.
+       - Supabase (Postgres + Realtime) o Ably/Pusher para pub/sub.
+
+    3) App de Chofer
+       - Una PWA que envía cada X segundos: { driverId, lat, lng, accuracy, updatedAt }.
+       - Usar navigator.geolocation.watchPosition() y Battery/Network info para optimizar.
+
+    4) App de Usuario/Pasajero
+       - Suscribirse a cambios de los choferes en su zona.
+       - Filtros por tipo de vehículo, calificación, distancia.
+
+    5) Seguridad
+       - Autenticación (JWT, OAuth) y autorización por rol (chofer/pasajero/admin).
+       - No confíes en el cliente: valida posiciones en el servidor.
+
+    6) Costos y escalabilidad
+       - Tile server gratuito (OSM) o proveedor comercial (MapTiler, Mapbox) con caché.
+       - Backend con colas (Redis) para eventos de ubicación.
+
+    7) Chile / SII (si integras pagos o boletas)
+       - Si luego agregas pagos y boletas/facturas electrónicas, conecta con tu módulo DTE.
+
+    🧪 Tests incluidos (ver botón "Tests"): verifican Leaflet, mapa, tiles, geolocalización, helpers y flujo de choferes.
+  -->
+</body>
+</html>
